@@ -1,0 +1,51 @@
+__pycache__/
+.venv/
+venv/
+env/
+.env
+.env.*
+.envrc
+.streamlit/secrets.toml
+.streamlit/*.toml
+*.pyc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Local data and generated outputs
+outputs/
+data/
+datasets/
+exports/
+results/
+*.csv~
+*.xlsx
+*.xls
+*.pptx
+*.pdf
+
+# Credentials and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*token*
+*secret*
+
+# Notebook and experiment noise
+.ipynb_checkpoints/
+wandb/
+runs/
+mlruns/
+
+# Large model artifacts should be submitted separately or loaded from Hugging Face
+models/
+checkpoints/
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.onnx
+*.h5

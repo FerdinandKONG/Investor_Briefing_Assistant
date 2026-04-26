@@ -1,0 +1,9 @@
+streamlit>=1.31
+transformers>=4.40
+torch
+pandas
+scikit-learn
+datasets
+huggingface_hub
+accelerate
+safetensors
