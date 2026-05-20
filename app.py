@@ -15,7 +15,7 @@ from transformers import pipeline
 # Model Configuration
 # ============================================================
 
-DEFAULT_SENTIMENT_MODEL = "ProsusAI/finbert"
+DEFAULT_SENTIMENT_MODEL = "yiyanghkust/finbert-tone"
 DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
 
