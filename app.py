@@ -15,9 +15,17 @@ from transformers import pipeline
 # Model Configuration
 # ============================================================
 
-DEFAULT_SENTIMENT_MODEL = "yiyanghkust/finbert-tone"
-DEFAULT_NER_MODEL = "dslim/bert-base-NER"
+sentiment_model_options = [
+    "ProsusAI/finbert",
+    "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
+    "soleimanian/financial-roberta-large-sentiment",
+]
 
+sentiment_model_id = st.selectbox(
+    "Select sentiment model for testing",
+    sentiment_model_options,
+    index=0,
+)
 
 # ============================================================
 # Helper Data Structure
