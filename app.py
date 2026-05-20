@@ -15,11 +15,7 @@ from transformers import pipeline
 # Model Configuration
 # ============================================================
 
-# Replace this with your own fine-tuned Hugging Face model before final submission.
-# Example: "your_username/financial-news-sentiment-finetuned"
 DEFAULT_SENTIMENT_MODEL = "ProsusAI/finbert"
-
-# Second Hugging Face pipeline for named entity recognition.
 DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
 
@@ -38,23 +34,14 @@ class RiskSignal:
 # ============================================================
 
 def read_config(name: str, default: str) -> str:
-    """
-    Read model IDs or tokens from Streamlit secrets or environment variables.
-    This allows easy switching to the final fine-tuned model on Streamlit Cloud.
-    """
     try:
         value = st.secrets.get(name, os.getenv(name, default))
     except Exception:
         value = os.getenv(name, default)
-
     return str(value).strip() if value is not None else default
 
 
 def normalize_sentiment_label(label: Any) -> str:
-    """
-    Normalize labels from different models into three project-friendly classes:
-    Positive, Negative, Neutral.
-    """
     if label is None:
         return ""
 
@@ -71,22 +58,16 @@ def normalize_sentiment_label(label: Any) -> str:
     if text in neutral_terms or "neutral" in text:
         return "Neutral"
 
-    # Keep original label if it cannot be safely mapped.
     return str(label).strip().title()
 
 
 def coerce_prediction(raw_prediction: Any) -> dict:
-    """
-    Convert Hugging Face pipeline output into a consistent dictionary:
-    {"label": ..., "score": ...}
-    """
     if isinstance(raw_prediction, list):
         if len(raw_prediction) == 0:
             return {"label": "Unknown", "score": 0.0}
 
         first = raw_prediction[0]
 
-        # Some pipelines return [[{...}, {...}]]
         if isinstance(first, list) and len(first) > 0:
             first = first[0]
 
@@ -106,9 +87,6 @@ def coerce_prediction(raw_prediction: Any) -> dict:
 
 
 def format_entities(raw_entities: list[dict]) -> list[dict]:
-    """
-    Format NER output into a clean table.
-    """
     formatted = []
 
     for item in raw_entities:
@@ -129,7 +107,6 @@ def format_entities(raw_entities: list[dict]) -> list[dict]:
             }
         )
 
-    # Remove repeated rows while preserving order.
     seen = set()
     unique_entities = []
 
@@ -143,10 +120,6 @@ def format_entities(raw_entities: list[dict]) -> list[dict]:
 
 
 def detect_risk_signals(text: str) -> list[RiskSignal]:
-    """
-    Rule-based business logic for identifying risk themes.
-    This is NOT counted as a Hugging Face pipeline. It is an additional business logic layer.
-    """
     risk_dictionary = {
         "Revenue or earnings pressure": [
             "missed expectations", "lower-than-expected", "revenue fell", "profit fell",
@@ -193,9 +166,6 @@ def detect_risk_signals(text: str) -> list[RiskSignal]:
 
 
 def evaluate_correctness(expected_label: str, predicted_label: str) -> str:
-    """
-    Compare expected label and app output.
-    """
     expected = normalize_sentiment_label(expected_label)
     predicted = normalize_sentiment_label(predicted_label)
 
@@ -211,9 +181,6 @@ def build_beginner_explanation(
     risk_signals: list[RiskSignal],
     entities: list[dict],
 ) -> str:
-    """
-    Build a short plain-English explanation for beginner investors.
-    """
     sentiment = normalize_sentiment_label(sentiment)
     confidence_pct = confidence * 100
 
@@ -264,36 +231,26 @@ def build_beginner_explanation(
 
 @st.cache_resource(show_spinner=False)
 def load_sentiment_pipeline(model_id: str, hf_token: str | None = None):
-    """
-    Load sentiment classification pipeline.
-    """
     kwargs = {
         "task": "text-classification",
         "model": model_id,
         "tokenizer": model_id,
     }
-
     if hf_token:
         kwargs["token"] = hf_token
-
     return pipeline(**kwargs)
 
 
 @st.cache_resource(show_spinner=False)
 def load_ner_pipeline(model_id: str, hf_token: str | None = None):
-    """
-    Load named entity recognition pipeline.
-    """
     kwargs = {
         "task": "token-classification",
         "model": model_id,
         "tokenizer": model_id,
         "aggregation_strategy": "simple",
     }
-
     if hf_token:
         kwargs["token"] = hf_token
-
     return pipeline(**kwargs)
 
 
@@ -302,13 +259,6 @@ def load_ner_pipeline(model_id: str, hf_token: str | None = None):
 # ============================================================
 
 def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
-    """
-    Run the full app pipeline:
-    1. Sentiment classification
-    2. Named entity recognition
-    3. Risk signal detection
-    4. Beginner-friendly explanation
-    """
     clean_text = " ".join(str(text or "").split())
 
     if not clean_text:
@@ -316,14 +266,10 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
 
     started = time.perf_counter()
 
-    # Pipeline 1: financial sentiment classification
     raw_sentiment = sentiment_pipe(clean_text, truncation=True, max_length=512)
     sentiment_result = coerce_prediction(raw_sentiment)
 
-    # Pipeline 2: named entity recognition
-    # Some NER pipelines do not accept truncation directly, so we truncate using tokenizer first.
     ner_text = clean_text
-
     try:
         tokenizer = ner_pipe.tokenizer
         token_ids = tokenizer.encode(
@@ -339,7 +285,6 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
     raw_entities = ner_pipe(ner_text)
     entities = format_entities(raw_entities)
 
-    # Additional business logic layer
     risk_signals = detect_risk_signals(clean_text)
 
     elapsed = time.perf_counter() - started
@@ -369,9 +314,6 @@ def run_batch(
     sentiment_pipe,
     ner_pipe,
 ) -> pd.DataFrame:
-    """
-    Run batch testing for experimental results.
-    """
     rows = []
 
     for idx, row in df.iterrows():
@@ -423,9 +365,6 @@ def run_batch(
 # ============================================================
 
 def render_metric_card(label: str, value: str, helper: str = ""):
-    """
-    Render a styled metric card.
-    """
     safe_label = html.escape(str(label))
     safe_value = html.escape(str(value))
     safe_helper = html.escape(str(helper))
@@ -443,9 +382,6 @@ def render_metric_card(label: str, value: str, helper: str = ""):
 
 
 def render_result_cards(result: dict):
-    """
-    Render result summary cards.
-    """
     confidence_pct = f"{result['confidence'] * 100:.1f}%"
     risk_count = len(result["risk_signals"])
     entity_count = len(result["entities"])
@@ -455,10 +391,8 @@ def render_result_cards(result: dict):
 
     with col1:
         render_metric_card("Sentiment", result["sentiment"], "Financial news tone")
-
     with col2:
         render_metric_card("Confidence", confidence_pct, "Model probability")
-
     with col3:
         render_metric_card("Runtime", f"{result['runtime_sec']:.2f}s", "Single input inference")
 
@@ -477,9 +411,6 @@ def render_result_cards(result: dict):
 
 
 def create_template_csv() -> bytes:
-    """
-    Create a small CSV template for batch testing.
-    """
     template = pd.DataFrame(
         {
             "text": [
@@ -512,7 +443,7 @@ st.markdown(
     """
     <style>
     .block-container {
-        max-width: 980px;
+        max-width: 920px;
         padding-top: 2rem;
         padding-bottom: 4rem;
     }
@@ -521,7 +452,7 @@ st.markdown(
         background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
         color: #ffffff;
         border-radius: 18px;
-        padding: 24px 24px 20px 24px;
+        padding: 28px 28px 22px 28px;
         border: 1px solid rgba(255,255,255,0.08);
         box-shadow: 0 12px 30px rgba(15,23,42,0.16);
         margin-bottom: 18px;
@@ -536,7 +467,7 @@ st.markdown(
     }
 
     .hero-title {
-        font-size: 30px;
+        font-size: 32px;
         font-weight: 800;
         line-height: 1.22;
         margin-bottom: 10px;
@@ -544,8 +475,17 @@ st.markdown(
 
     .hero-sub {
         font-size: 15px;
-        line-height: 1.65;
+        line-height: 1.7;
         color: #e5e7eb;
+    }
+
+    .section-card {
+        background: var(--secondary-background-color);
+        border: 1px solid rgba(148,163,184,0.22);
+        border-radius: 18px;
+        padding: 20px 20px 12px 20px;
+        margin-bottom: 22px;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.04);
     }
 
     .brief-card,
@@ -583,7 +523,7 @@ st.markdown(
 
     .info-box {
         border-left: 4px solid #2563eb;
-        padding: 10px 14px;
+        padding: 12px 14px;
         background: rgba(37, 99, 235, 0.08);
         border-radius: 10px;
         font-size: 13px;
@@ -593,11 +533,16 @@ st.markdown(
 
     .disclaimer {
         border-left: 4px solid #f59e0b;
-        padding: 10px 14px;
+        padding: 12px 14px;
         background: rgba(245, 158, 11, 0.10);
         border-radius: 10px;
         font-size: 13px;
-        margin-top: 16px;
+        margin-top: 20px;
+    }
+
+    .subtle-text {
+        color: #94a3b8;
+        font-size: 13px;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -625,27 +570,23 @@ hf_token = read_config("HF_TOKEN", "")
 st.markdown(
     """
     <div class="hero-card">
-        <div class="hero-kicker">Deep learning business application</div>
+        <div class="hero-kicker">Deep Learning Business Application</div>
         <div class="hero-title">Financial News Sentiment & Risk Briefing Assistant</div>
         <div class="hero-sub">
             This app helps beginner investors quickly understand financial news.
-            It classifies the sentiment of a company-related news item, extracts key entities,
-            detects possible risk themes, and generates a plain-English briefing.
+            It classifies sentiment, extracts key entities, detects possible risk themes,
+            and generates a plain-English briefing.
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-with st.sidebar:
-    st.subheader("Model Configuration")
-    st.caption("For final submission, replace the default sentiment model with your own fine-tuned Hugging Face model.")
-
+with st.expander("View model configuration and pipeline structure"):
     st.code(
-        f"SENTIMENT_MODEL_ID={sentiment_model_id}\nNER_MODEL_ID={ner_model_id}",
+        f"SENTIMENT_MODEL_ID = {sentiment_model_id}\nNER_MODEL_ID = {ner_model_id}",
         language="text",
     )
-
     st.markdown(
         """
         **Project pipeline structure**
@@ -663,12 +604,10 @@ try:
             model_id=sentiment_model_id,
             hf_token=hf_token if hf_token else None,
         )
-
         ner_pipe = load_ner_pipeline(
             model_id=ner_model_id,
             hf_token=hf_token if hf_token else None,
         )
-
 except Exception as exc:
     st.error(f"Model loading failed: {exc}")
     st.info(
@@ -693,6 +632,7 @@ examples = [
 if "news_text" not in st.session_state:
     st.session_state.news_text = examples[0]
 
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.subheader("Single News Briefing")
 
 st.markdown(
@@ -705,14 +645,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-sample_choice = st.selectbox(
-    "Try a sample news sentence",
-    examples,
-    index=0,
-)
+sample_col1, sample_col2 = st.columns([3, 1])
 
-if st.button("Use selected sample", use_container_width=True):
-    st.session_state.news_text = sample_choice
+with sample_col1:
+    sample_choice = st.selectbox(
+        "Try a sample news sentence",
+        examples,
+        index=0,
+    )
+
+with sample_col2:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    if st.button("Use sample", use_container_width=True):
+        st.session_state.news_text = sample_choice
 
 with st.form("single_news_form", clear_on_submit=False):
     news_text = st.text_area(
@@ -727,6 +672,8 @@ with st.form("single_news_form", clear_on_submit=False):
         type="primary",
         use_container_width=True,
     )
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 if submitted:
     try:
@@ -810,7 +757,7 @@ if submitted:
 # Batch Testing Section
 # ============================================================
 
-st.divider()
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.subheader("Batch Testing for Experimental Results")
 
 st.markdown(
@@ -824,18 +771,23 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.download_button(
-    label="Download batch testing CSV template",
-    data=create_template_csv(),
-    file_name="batch_testing_template.csv",
-    mime="text/csv",
-    use_container_width=True,
-)
+top_col1, top_col2 = st.columns([1, 1])
 
-uploaded_file = st.file_uploader(
-    "Upload testing CSV",
-    type=["csv"],
-)
+with top_col1:
+    st.download_button(
+        label="Download batch testing CSV template",
+        data=create_template_csv(),
+        file_name="batch_testing_template.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+with top_col2:
+    uploaded_file = st.file_uploader(
+        "Upload testing CSV",
+        type=["csv"],
+        label_visibility="visible",
+    )
 
 if uploaded_file is not None:
     try:
@@ -852,39 +804,45 @@ if uploaded_file is not None:
 
         columns = list(batch_df.columns)
 
-        default_text_index = columns.index("text") if "text" in columns else 0
-        text_col = st.selectbox(
-            "Select text column",
-            columns,
-            index=default_text_index,
-        )
+        config_col1, config_col2, config_col3 = st.columns([2, 2, 1])
 
-        expected_options = ["None"] + columns
-        expected_default = (
-            expected_options.index("expected_label")
-            if "expected_label" in columns
-            else 0
-        )
+        with config_col1:
+            default_text_index = columns.index("text") if "text" in columns else 0
+            text_col = st.selectbox(
+                "Select text column",
+                columns,
+                index=default_text_index,
+            )
 
-        expected_col_choice = st.selectbox(
-            "Select expected label column",
-            expected_options,
-            index=expected_default,
-        )
+        with config_col2:
+            expected_options = ["None"] + columns
+            expected_default = (
+                expected_options.index("expected_label")
+                if "expected_label" in columns
+                else 0
+            )
 
-        max_rows = st.slider(
-            "Maximum rows to test",
-            min_value=1,
-            max_value=min(200, len(batch_df)),
-            value=min(50, len(batch_df)),
-        )
+            expected_col_choice = st.selectbox(
+                "Select expected label column",
+                expected_options,
+                index=expected_default,
+            )
+
+        with config_col3:
+            max_rows = st.number_input(
+                "Max rows",
+                min_value=1,
+                max_value=min(200, len(batch_df)),
+                value=min(50, len(batch_df)),
+                step=1,
+            )
 
         if st.button("Run batch test", type="primary", use_container_width=True):
             expected_col = None if expected_col_choice == "None" else expected_col_choice
 
             with st.spinner("Running batch predictions..."):
                 result_df = run_batch(
-                    df=batch_df.head(max_rows),
+                    df=batch_df.head(int(max_rows)),
                     text_col=text_col,
                     expected_col=expected_col,
                     sentiment_pipe=sentiment_pipe,
@@ -894,24 +852,28 @@ if uploaded_file is not None:
             if result_df.empty:
                 st.warning("No valid text rows were processed.")
             else:
+                metric_cols = st.columns(2)
+
                 if expected_col:
                     valid_rows = result_df["correct_or_not"].isin(["Correct", "Incorrect"])
                     correct = (result_df["correct_or_not"] == "Correct").sum()
                     total = valid_rows.sum()
                     accuracy = correct / total if total else 0.0
 
-                    render_metric_card(
-                        "App Accuracy",
-                        f"{accuracy:.1%}",
-                        f"{correct} correct out of {total} testing samples",
-                    )
+                    with metric_cols[0]:
+                        render_metric_card(
+                            "App Accuracy",
+                            f"{accuracy:.1%}",
+                            f"{correct} correct out of {total} testing samples",
+                        )
 
                 avg_runtime = result_df["runtime_sec"].mean()
-                render_metric_card(
-                    "Average Runtime",
-                    f"{avg_runtime:.2f}s",
-                    "Average runtime per testing sample",
-                )
+                with metric_cols[1 if expected_col else 0]:
+                    render_metric_card(
+                        "Average Runtime",
+                        f"{avg_runtime:.2f}s",
+                        "Average runtime per testing sample",
+                    )
 
                 st.dataframe(
                     result_df,
@@ -929,6 +891,8 @@ if uploaded_file is not None:
                     mime="text/csv",
                     use_container_width=True,
                 )
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
