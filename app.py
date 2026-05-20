@@ -757,142 +757,142 @@ if submitted:
 # Batch Testing Section
 # ============================================================
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.subheader("Batch Testing for Experimental Results")
+with st.expander("Experimental Testing Panel", expanded=False):
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("Batch Testing for Experimental Results")
 
-st.markdown(
-    """
-    <div class="info-box">
-        Upload a CSV file for testing. The file should include a news text column.
-        If it also includes an expected sentiment label column, the app will calculate accuracy.
-        This section can help generate records for the Experimental Results Excel file.
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-top_col1, top_col2 = st.columns([1, 1])
-
-with top_col1:
-    st.download_button(
-        label="Download batch testing CSV template",
-        data=create_template_csv(),
-        file_name="batch_testing_template.csv",
-        mime="text/csv",
-        use_container_width=True,
+    st.markdown(
+        """
+        <div class="info-box">
+            This section is mainly used for project evaluation. Upload a labelled testing CSV
+            to calculate app accuracy and generate records for the Experimental Results Excel file.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-with top_col2:
-    uploaded_file = st.file_uploader(
-        "Upload testing CSV",
-        type=["csv"],
-        label_visibility="visible",
-    )
+    top_col1, top_col2 = st.columns([1, 1])
 
-if uploaded_file is not None:
-    try:
-        batch_df = pd.read_csv(uploaded_file)
-    except Exception as exc:
-        st.error(f"Failed to read CSV file: {exc}")
-        st.stop()
+    with top_col1:
+        st.download_button(
+            label="Download batch testing CSV template",
+            data=create_template_csv(),
+            file_name="batch_testing_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-    if batch_df.empty:
-        st.warning("The uploaded CSV is empty.")
-    else:
-        st.write("Preview of uploaded data")
-        st.dataframe(batch_df.head(10), use_container_width=True)
+    with top_col2:
+        uploaded_file = st.file_uploader(
+            "Upload testing CSV",
+            type=["csv"],
+            label_visibility="visible",
+        )
 
-        columns = list(batch_df.columns)
+    if uploaded_file is not None:
+        try:
+            batch_df = pd.read_csv(uploaded_file)
+        except Exception as exc:
+            st.error(f"Failed to read CSV file: {exc}")
+            st.stop()
 
-        config_col1, config_col2, config_col3 = st.columns([2, 2, 1])
+        if batch_df.empty:
+            st.warning("The uploaded CSV is empty.")
+        else:
+            st.write("Preview of uploaded data")
+            st.dataframe(batch_df.head(10), use_container_width=True)
 
-        with config_col1:
-            default_text_index = columns.index("text") if "text" in columns else 0
-            text_col = st.selectbox(
-                "Select text column",
-                columns,
-                index=default_text_index,
-            )
+            columns = list(batch_df.columns)
 
-        with config_col2:
-            expected_options = ["None"] + columns
-            expected_default = (
-                expected_options.index("expected_label")
-                if "expected_label" in columns
-                else 0
-            )
+            config_col1, config_col2, config_col3 = st.columns([2, 2, 1])
 
-            expected_col_choice = st.selectbox(
-                "Select expected label column",
-                expected_options,
-                index=expected_default,
-            )
-
-        with config_col3:
-            max_rows = st.number_input(
-                "Max rows",
-                min_value=1,
-                max_value=min(200, len(batch_df)),
-                value=min(50, len(batch_df)),
-                step=1,
-            )
-
-        if st.button("Run batch test", type="primary", use_container_width=True):
-            expected_col = None if expected_col_choice == "None" else expected_col_choice
-
-            with st.spinner("Running batch predictions..."):
-                result_df = run_batch(
-                    df=batch_df.head(int(max_rows)),
-                    text_col=text_col,
-                    expected_col=expected_col,
-                    sentiment_pipe=sentiment_pipe,
-                    ner_pipe=ner_pipe,
+            with config_col1:
+                default_text_index = columns.index("text") if "text" in columns else 0
+                text_col = st.selectbox(
+                    "Select text column",
+                    columns,
+                    index=default_text_index,
                 )
 
-            if result_df.empty:
-                st.warning("No valid text rows were processed.")
-            else:
-                metric_cols = st.columns(2)
+            with config_col2:
+                expected_options = ["None"] + columns
+                expected_default = (
+                    expected_options.index("expected_label")
+                    if "expected_label" in columns
+                    else 0
+                )
 
-                if expected_col:
-                    valid_rows = result_df["correct_or_not"].isin(["Correct", "Incorrect"])
-                    correct = (result_df["correct_or_not"] == "Correct").sum()
-                    total = valid_rows.sum()
-                    accuracy = correct / total if total else 0.0
+                expected_col_choice = st.selectbox(
+                    "Select expected label column",
+                    expected_options,
+                    index=expected_default,
+                )
 
-                    with metric_cols[0]:
-                        render_metric_card(
-                            "App Accuracy",
-                            f"{accuracy:.1%}",
-                            f"{correct} correct out of {total} testing samples",
-                        )
+            with config_col3:
+                max_rows = st.number_input(
+                    "Max rows",
+                    min_value=1,
+                    max_value=min(200, len(batch_df)),
+                    value=min(50, len(batch_df)),
+                    step=1,
+                )
 
-                avg_runtime = result_df["runtime_sec"].mean()
-                with metric_cols[1 if expected_col else 0]:
-                    render_metric_card(
-                        "Average Runtime",
-                        f"{avg_runtime:.2f}s",
-                        "Average runtime per testing sample",
+            if st.button("Run batch test", type="primary", use_container_width=True):
+                expected_col = None if expected_col_choice == "None" else expected_col_choice
+
+                with st.spinner("Running batch predictions..."):
+                    result_df = run_batch(
+                        df=batch_df.head(int(max_rows)),
+                        text_col=text_col,
+                        expected_col=expected_col,
+                        sentiment_pipe=sentiment_pipe,
+                        ner_pipe=ner_pipe,
                     )
 
-                st.dataframe(
-                    result_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                if result_df.empty:
+                    st.warning("No valid text rows were processed.")
+                else:
+                    metric_cols = st.columns(2)
 
-                buffer = StringIO()
-                result_df.to_csv(buffer, index=False)
+                    if expected_col:
+                        valid_rows = result_df["correct_or_not"].isin(["Correct", "Incorrect"])
+                        correct = (result_df["correct_or_not"] == "Correct").sum()
+                        total = valid_rows.sum()
+                        accuracy = correct / total if total else 0.0
 
-                st.download_button(
-                    label="Download batch results CSV",
-                    data=buffer.getvalue().encode("utf-8"),
-                    file_name="batch_testing_results.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+                        with metric_cols[0]:
+                            render_metric_card(
+                                "App Accuracy",
+                                f"{accuracy:.1%}",
+                                f"{correct} correct out of {total} testing samples",
+                            )
 
-st.markdown("</div>", unsafe_allow_html=True)
+                    avg_runtime = result_df["runtime_sec"].mean()
+                    with metric_cols[1 if expected_col else 0]:
+                        render_metric_card(
+                            "Average Runtime",
+                            f"{avg_runtime:.2f}s",
+                            "Average runtime per testing sample",
+                        )
+
+                    st.dataframe(
+                        result_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    buffer = StringIO()
+                    result_df.to_csv(buffer, index=False)
+
+                    st.download_button(
+                        label="Download batch results CSV",
+                        data=buffer.getvalue().encode("utf-8"),
+                        file_name="batch_testing_results.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
