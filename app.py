@@ -19,7 +19,6 @@ from transformers import pipeline
 # Important: The app only loads and uses ONE selected sentiment model at a time.
 STABLE_SENTIMENT_MODELS = {
     "DistilRoBERTa Financial News": "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
-    "HKUST FinBERT Tone": "yiyanghkust/finbert-tone",
     "FinancialBERT Sentiment": "ahmedrachid/FinancialBERT-Sentiment-Analysis",
     "ProsusAI FinBERT": "ProsusAI/finbert",
 }
