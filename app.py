@@ -24,8 +24,7 @@ DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 # Model 3: general sentiment baseline, fast but not financial-domain specific
 SENTIMENT_MODEL_OPTIONS = [
     "ProsusAI/finbert",
-    "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
-    "distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+    
 ]
 
 
