@@ -18,10 +18,14 @@ from transformers import pipeline
 DEFAULT_SENTIMENT_MODEL = "ProsusAI/finbert"
 DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
+# Three models for sentiment model selection testing.
+# Model 1: financial-domain sentiment model
+# Model 2: financial-news sentiment model
+# Model 3: general sentiment baseline, fast but not financial-domain specific
 SENTIMENT_MODEL_OPTIONS = [
     "ProsusAI/finbert",
     "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
-    "soleimanian/financial-roberta-large-sentiment",
+    "distilbert/distilbert-base-uncased-finetuned-sst-2-english",
 ]
 
 
@@ -65,10 +69,12 @@ def normalize_sentiment_label(label: Any) -> str:
         "positive", "pos", "bullish", "increase", "up",
         "label_2", "2"
     }
+
     negative_terms = {
         "negative", "neg", "bearish", "decrease", "down",
         "label_0", "0"
     }
+
     neutral_terms = {
         "neutral", "neu", "label_1", "1"
     }
@@ -703,25 +709,21 @@ st.markdown(
 # Model Selection and Loading
 # ============================================================
 
-configured_sentiment_model = read_config("SENTIMENT_MODEL_ID", DEFAULT_SENTIMENT_MODEL)
 configured_ner_model = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
 hf_token = read_config("HF_TOKEN", "")
-
-sentiment_model_options = list(
-    dict.fromkeys([configured_sentiment_model] + SENTIMENT_MODEL_OPTIONS)
-)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
 sentiment_model_id = st.selectbox(
     "Select sentiment model for testing",
-    sentiment_model_options,
+    SENTIMENT_MODEL_OPTIONS,
     index=0,
 )
 
 st.caption(
     "Use the same testing CSV to compare different sentiment models. "
-    "Record accuracy and runtime in the Experimental Results Excel file."
+    "Record accuracy and runtime in the Experimental Results Excel file. "
+    "The third model is a fast general sentiment baseline and may perform poorly on Neutral financial news."
 )
 
 with st.expander("View model configuration and pipeline structure", expanded=False):
