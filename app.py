@@ -15,7 +15,18 @@ from transformers import pipeline
 # Model Configuration
 # ============================================================
 
-DEFAULT_SENTIMENT_MODEL = "ProsusAI/finbert"
+# Stable sentiment models for model selection experiments.
+# Important: The app only loads and uses ONE selected sentiment model at a time.
+STABLE_SENTIMENT_MODELS = {
+    "DistilRoBERTa Financial News": "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
+    "HKUST FinBERT Tone": "yiyanghkust/finbert-tone",
+    "FinancialBERT Sentiment": "ahmedrachid/FinancialBERT-Sentiment-Analysis",
+    "ProsusAI FinBERT": "ProsusAI/finbert",
+}
+
+DEFAULT_SENTIMENT_MODEL = "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+
+# Second Hugging Face pipeline: Named Entity Recognition
 DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
 
@@ -34,34 +45,99 @@ class RiskSignal:
 # ============================================================
 
 def read_config(name: str, default: str) -> str:
+    """
+    Read values from Streamlit secrets or environment variables.
+    """
     try:
         value = st.secrets.get(name, os.getenv(name, default))
     except Exception:
         value = os.getenv(name, default)
+
     return str(value).strip() if value is not None else default
 
 
-def normalize_sentiment_label(label: Any) -> str:
+def normalize_sentiment_label(label: Any, model_id: str = "") -> str:
+    """
+    Normalize different Hugging Face model outputs into:
+    Positive, Negative, Neutral.
+
+    Different models may use different LABEL_0 / LABEL_1 / LABEL_2 mappings.
+    This function prevents label mapping errors during model testing.
+    """
     if label is None:
         return ""
 
-    text = str(label).strip().lower()
+    raw = str(label).strip()
+    text = raw.lower()
+    model_id = str(model_id or "").lower()
 
-    positive_terms = {"positive", "pos", "bullish", "increase", "up", "label_2", "2"}
-    negative_terms = {"negative", "neg", "bearish", "decrease", "down", "label_0", "0"}
-    neutral_terms = {"neutral", "neu", "label_1", "1"}
+    # HKUST FinBERT Tone mapping:
+    # LABEL_0 = Neutral, LABEL_1 = Positive, LABEL_2 = Negative
+    if "yiyanghkust/finbert-tone" in model_id:
+        mapping = {
+            "label_0": "Neutral",
+            "label_1": "Positive",
+            "label_2": "Negative",
+            "0": "Neutral",
+            "1": "Positive",
+            "2": "Negative",
+            "neutral": "Neutral",
+            "positive": "Positive",
+            "negative": "Negative",
+        }
+        if text in mapping:
+            return mapping[text]
 
-    if text in positive_terms or "positive" in text or "bullish" in text:
+    # FinancialBERT common mapping:
+    # LABEL_0 = Negative, LABEL_1 = Neutral, LABEL_2 = Positive
+    if "ahmedrachid/financialbert-sentiment-analysis" in model_id:
+        mapping = {
+            "label_0": "Negative",
+            "label_1": "Neutral",
+            "label_2": "Positive",
+            "0": "Negative",
+            "1": "Neutral",
+            "2": "Positive",
+            "negative": "Negative",
+            "neutral": "Neutral",
+            "positive": "Positive",
+        }
+        if text in mapping:
+            return mapping[text]
+
+    # General text labels
+    if "positive" in text or "bullish" in text:
         return "Positive"
-    if text in negative_terms or "negative" in text or "bearish" in text:
+    if "negative" in text or "bearish" in text:
         return "Negative"
-    if text in neutral_terms or "neutral" in text:
+    if "neutral" in text:
         return "Neutral"
 
-    return str(label).strip().title()
+    # General fallback mapping used by many 3-class sentiment models:
+    # LABEL_0 = Negative, LABEL_1 = Neutral, LABEL_2 = Positive
+    fallback_mapping = {
+        "label_0": "Negative",
+        "label_1": "Neutral",
+        "label_2": "Positive",
+        "0": "Negative",
+        "1": "Neutral",
+        "2": "Positive",
+        "pos": "Positive",
+        "neg": "Negative",
+        "neu": "Neutral",
+    }
+
+    if text in fallback_mapping:
+        return fallback_mapping[text]
+
+    return raw.title()
 
 
-def coerce_prediction(raw_prediction: Any) -> dict:
+def coerce_prediction(raw_prediction: Any, model_id: str = "") -> dict:
+    """
+    Convert Hugging Face pipeline output into a standard format:
+    {"label": ..., "score": ...}
+    """
     if isinstance(raw_prediction, list):
         if len(raw_prediction) == 0:
             return {"label": "Unknown", "score": 0.0}
@@ -73,20 +149,25 @@ def coerce_prediction(raw_prediction: Any) -> dict:
 
         if isinstance(first, dict):
             return {
-                "label": normalize_sentiment_label(first.get("label", "Unknown")),
+                "label": normalize_sentiment_label(first.get("label", "Unknown"), model_id),
                 "score": float(first.get("score", 0.0)),
+                "raw_label": str(first.get("label", "Unknown")),
             }
 
     if isinstance(raw_prediction, dict):
         return {
-            "label": normalize_sentiment_label(raw_prediction.get("label", "Unknown")),
+            "label": normalize_sentiment_label(raw_prediction.get("label", "Unknown"), model_id),
             "score": float(raw_prediction.get("score", 0.0)),
+            "raw_label": str(raw_prediction.get("label", "Unknown")),
         }
 
-    return {"label": "Unknown", "score": 0.0}
+    return {"label": "Unknown", "score": 0.0, "raw_label": "Unknown"}
 
 
 def format_entities(raw_entities: list[dict]) -> list[dict]:
+    """
+    Format NER output into a clean table.
+    """
     formatted = []
 
     for item in raw_entities:
@@ -120,32 +201,37 @@ def format_entities(raw_entities: list[dict]) -> list[dict]:
 
 
 def detect_risk_signals(text: str) -> list[RiskSignal]:
+    """
+    Rule-based business logic for identifying risk themes.
+    This is not counted as a Hugging Face pipeline.
+    """
     risk_dictionary = {
         "Revenue or earnings pressure": [
-            "missed expectations", "lower-than-expected", "revenue fell", "profit fell",
-            "loss widened", "weak earnings", "margin pressure", "decline in sales"
+            "missed expectations", "lower-than-expected", "weaker-than-expected",
+            "revenue fell", "profit fell", "loss widened", "weak earnings",
+            "margin pressure", "decline in sales", "sales dropped"
         ],
         "Market competition": [
             "competition", "rival", "market share", "price war", "competitive pressure"
         ],
         "Regulatory or legal risk": [
-            "regulator", "regulatory", "lawsuit", "legal", "investigation", "fine",
-            "penalty", "compliance"
+            "regulator", "regulatory", "lawsuit", "legal", "investigation",
+            "fine", "penalty", "compliance", "scrutiny", "export restrictions"
         ],
         "Demand or delivery weakness": [
-            "weak demand", "lower demand", "delivery fell", "shipments fell",
-            "slowdown", "inventory buildup"
+            "weak demand", "lower demand", "delivery fell", "deliveries fell",
+            "shipments fell", "slowdown", "inventory buildup"
         ],
         "Debt or liquidity risk": [
             "debt", "liquidity", "cash flow", "bankruptcy", "default", "credit risk"
         ],
         "Operational disruption": [
             "shutdown", "supply chain", "production halt", "strike", "delay",
-            "shortage", "recall"
+            "shortage", "recall", "production quality", "wiring flaws"
         ],
         "Cost pressure": [
             "costs rose", "higher costs", "inflation", "layoff", "job cuts",
-            "restructuring"
+            "workforce cuts", "restructuring", "tariffs"
         ],
     }
 
@@ -154,6 +240,7 @@ def detect_risk_signals(text: str) -> list[RiskSignal]:
 
     for risk_name, keywords in risk_dictionary.items():
         matched = []
+
         for kw in keywords:
             pattern = r"\b" + re.escape(kw.lower()) + r"\b"
             if re.search(pattern, lowered):
@@ -166,6 +253,9 @@ def detect_risk_signals(text: str) -> list[RiskSignal]:
 
 
 def evaluate_correctness(expected_label: str, predicted_label: str) -> str:
+    """
+    Compare expected label and app output.
+    """
     expected = normalize_sentiment_label(expected_label)
     predicted = normalize_sentiment_label(predicted_label)
 
@@ -181,6 +271,9 @@ def build_beginner_explanation(
     risk_signals: list[RiskSignal],
     entities: list[dict],
 ) -> str:
+    """
+    Build a short plain-English explanation for beginner investors.
+    """
     sentiment = normalize_sentiment_label(sentiment)
     confidence_pct = confidence * 100
 
@@ -217,12 +310,10 @@ def build_beginner_explanation(
     else:
         entity_text = " No major named entities were detected by the NER model."
 
-    explanation = (
+    return (
         f"{tone_explanation} The model confidence is {confidence_pct:.1f}%."
         f"{risk_text}{entity_text}"
     )
-
-    return explanation
 
 
 # ============================================================
@@ -231,26 +322,37 @@ def build_beginner_explanation(
 
 @st.cache_resource(show_spinner=False)
 def load_sentiment_pipeline(model_id: str, hf_token: str | None = None):
+    """
+    Load only the selected sentiment model.
+    Streamlit caches by model_id, so different models will not be mixed.
+    """
     kwargs = {
         "task": "text-classification",
         "model": model_id,
         "tokenizer": model_id,
     }
+
     if hf_token:
         kwargs["token"] = hf_token
+
     return pipeline(**kwargs)
 
 
 @st.cache_resource(show_spinner=False)
 def load_ner_pipeline(model_id: str, hf_token: str | None = None):
+    """
+    Load the NER pipeline.
+    """
     kwargs = {
         "task": "token-classification",
         "model": model_id,
         "tokenizer": model_id,
         "aggregation_strategy": "simple",
     }
+
     if hf_token:
         kwargs["token"] = hf_token
+
     return pipeline(**kwargs)
 
 
@@ -258,7 +360,14 @@ def load_ner_pipeline(model_id: str, hf_token: str | None = None):
 # Core Analysis Functions
 # ============================================================
 
-def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
+def analyze_news(text: str, sentiment_pipe, ner_pipe, sentiment_model_id: str) -> dict:
+    """
+    Run the full app process using ONLY the currently selected sentiment model:
+    1. Sentiment classification
+    2. Named entity recognition
+    3. Rule-based risk detection
+    4. Beginner-friendly explanation
+    """
     clean_text = " ".join(str(text or "").split())
 
     if not clean_text:
@@ -266,10 +375,13 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
 
     started = time.perf_counter()
 
+    # Pipeline 1: selected sentiment model only
     raw_sentiment = sentiment_pipe(clean_text, truncation=True, max_length=512)
-    sentiment_result = coerce_prediction(raw_sentiment)
+    sentiment_result = coerce_prediction(raw_sentiment, sentiment_model_id)
 
+    # Pipeline 2: NER
     ner_text = clean_text
+
     try:
         tokenizer = ner_pipe.tokenizer
         token_ids = tokenizer.encode(
@@ -286,7 +398,6 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
     entities = format_entities(raw_entities)
 
     risk_signals = detect_risk_signals(clean_text)
-
     elapsed = time.perf_counter() - started
 
     explanation = build_beginner_explanation(
@@ -299,11 +410,13 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe) -> dict:
     return {
         "text": clean_text,
         "sentiment": sentiment_result["label"],
+        "raw_sentiment_label": sentiment_result.get("raw_label", ""),
         "confidence": sentiment_result["score"],
         "entities": entities,
         "risk_signals": risk_signals,
         "explanation": explanation,
         "runtime_sec": elapsed,
+        "sentiment_model_id": sentiment_model_id,
     }
 
 
@@ -313,7 +426,12 @@ def run_batch(
     expected_col: str | None,
     sentiment_pipe,
     ner_pipe,
+    sentiment_model_id: str,
 ) -> pd.DataFrame:
+    """
+    Run batch testing using ONE selected sentiment model.
+    This prevents different sentiment pipelines from being mixed in one test.
+    """
     rows = []
 
     for idx, row in df.iterrows():
@@ -323,15 +441,23 @@ def run_batch(
             continue
 
         try:
-            result = analyze_news(text, sentiment_pipe, ner_pipe)
+            result = analyze_news(
+                text=text,
+                sentiment_pipe=sentiment_pipe,
+                ner_pipe=ner_pipe,
+                sentiment_model_id=sentiment_model_id,
+            )
+
             expected = normalize_sentiment_label(row.get(expected_col, "")) if expected_col else ""
             correctness = evaluate_correctness(expected, result["sentiment"]) if expected_col else ""
 
             rows.append(
                 {
                     "test_id": idx + 1,
+                    "sentiment_model": sentiment_model_id,
                     "input_news": result["text"],
                     "expected_label": expected,
+                    "raw_model_label": result["raw_sentiment_label"],
                     "app_output": result["sentiment"],
                     "confidence": round(result["confidence"], 4),
                     "runtime_sec": round(result["runtime_sec"], 3),
@@ -345,8 +471,10 @@ def run_batch(
             rows.append(
                 {
                     "test_id": idx + 1,
+                    "sentiment_model": sentiment_model_id,
                     "input_news": str(text),
                     "expected_label": row.get(expected_col, "") if expected_col else "",
+                    "raw_model_label": "Error",
                     "app_output": "Error",
                     "confidence": 0,
                     "runtime_sec": 0,
@@ -391,8 +519,10 @@ def render_result_cards(result: dict):
 
     with col1:
         render_metric_card("Sentiment", result["sentiment"], "Financial news tone")
+
     with col2:
         render_metric_card("Confidence", confidence_pct, "Model probability")
+
     with col3:
         render_metric_card("Runtime", f"{result['runtime_sec']:.2f}s", "Single input inference")
 
@@ -531,6 +661,16 @@ st.markdown(
         margin-bottom: 14px;
     }
 
+    .warning-box {
+        border-left: 4px solid #f59e0b;
+        padding: 12px 14px;
+        background: rgba(245, 158, 11, 0.10);
+        border-radius: 10px;
+        font-size: 13px;
+        margin-top: 10px;
+        margin-bottom: 14px;
+    }
+
     .disclaimer {
         border-left: 4px solid #f59e0b;
         padding: 12px 14px;
@@ -538,11 +678,6 @@ st.markdown(
         border-radius: 10px;
         font-size: 13px;
         margin-top: 20px;
-    }
-
-    .subtle-text {
-        color: #94a3b8;
-        font-size: 13px;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -560,11 +695,9 @@ st.markdown(
 
 
 # ============================================================
-# Load Models
+# Model Selection
 # ============================================================
 
-sentiment_model_id = read_config("SENTIMENT_MODEL_ID", DEFAULT_SENTIMENT_MODEL)
-ner_model_id = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
 hf_token = read_config("HF_TOKEN", "")
 
 st.markdown(
@@ -582,11 +715,30 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.expander("View model configuration and pipeline structure"):
-    st.code(
-        f"SENTIMENT_MODEL_ID = {sentiment_model_id}\nNER_MODEL_ID = {ner_model_id}",
-        language="text",
-    )
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.subheader("Model Selection")
+
+selected_model_name = st.selectbox(
+    "Select one sentiment model for this test",
+    list(STABLE_SENTIMENT_MODELS.keys()),
+    index=0,
+)
+
+sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
+ner_model_id = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
+
+st.markdown(
+    f"""
+    <div class="info-box">
+        Current sentiment model: <b>{html.escape(sentiment_model_id)}</b><br>
+        Current NER model: <b>{html.escape(ner_model_id)}</b><br>
+        Only the selected sentiment model will be used in single testing and batch testing.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+with st.expander("View pipeline structure"):
     st.markdown(
         """
         **Project pipeline structure**
@@ -594,20 +746,33 @@ with st.expander("View model configuration and pipeline structure"):
         1. Hugging Face Pipeline 1: Financial sentiment classification  
         2. Hugging Face Pipeline 2: Named entity recognition  
         3. Additional business logic: Risk signal detection  
-        4. Output: Beginner-friendly briefing
+        4. Output: Beginner-friendly briefing  
+
+        For experimental results, select one sentiment model, run the same testing CSV,
+        download the result, and then repeat the process for another model.
         """
     )
 
+st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# Load Selected Pipelines
+# ============================================================
+
 try:
-    with st.spinner("Loading Hugging Face pipelines..."):
+    with st.spinner(f"Loading selected sentiment pipeline: {selected_model_name}"):
         sentiment_pipe = load_sentiment_pipeline(
             model_id=sentiment_model_id,
             hf_token=hf_token if hf_token else None,
         )
+
+    with st.spinner("Loading NER pipeline..."):
         ner_pipe = load_ner_pipeline(
             model_id=ner_model_id,
             hf_token=hf_token if hf_token else None,
         )
+
 except Exception as exc:
     st.error(f"Model loading failed: {exc}")
     st.info(
@@ -677,7 +842,13 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 if submitted:
     try:
-        result = analyze_news(news_text, sentiment_pipe, ner_pipe)
+        result = analyze_news(
+            text=news_text,
+            sentiment_pipe=sentiment_pipe,
+            ner_pipe=ner_pipe,
+            sentiment_model_id=sentiment_model_id,
+        )
+
         render_result_cards(result)
 
         tab_briefing, tab_entities, tab_risks, tab_export = st.tabs(
@@ -685,8 +856,14 @@ if submitted:
         )
 
         with tab_briefing:
+            st.markdown("**Model used**")
+            st.write(result["sentiment_model_id"])
+
             st.markdown("**Input news**")
             st.write(result["text"])
+
+            st.markdown("**Raw model label**")
+            st.write(result["raw_sentiment_label"])
 
             st.markdown("**Plain-English explanation**")
             st.write(result["explanation"])
@@ -728,7 +905,9 @@ if submitted:
             export_df = pd.DataFrame(
                 [
                     {
+                        "sentiment_model": result["sentiment_model_id"],
                         "input_news": result["text"],
+                        "raw_model_label": result["raw_sentiment_label"],
                         "sentiment": result["sentiment"],
                         "confidence": round(result["confidence"], 4),
                         "runtime_sec": round(result["runtime_sec"], 3),
@@ -754,7 +933,7 @@ if submitted:
 
 
 # ============================================================
-# Batch Testing Section
+# Experimental Testing Panel
 # ============================================================
 
 with st.expander("Experimental Testing Panel", expanded=False):
@@ -762,10 +941,11 @@ with st.expander("Experimental Testing Panel", expanded=False):
     st.subheader("Batch Testing for Experimental Results")
 
     st.markdown(
-        """
-        <div class="info-box">
-            This section is mainly used for project evaluation. Upload a labelled testing CSV
-            to calculate app accuracy and generate records for the Experimental Results Excel file.
+        f"""
+        <div class="warning-box">
+            This section is for project evaluation. It uses only the currently selected sentiment model:
+            <b>{html.escape(sentiment_model_id)}</b>.
+            To compare models, run this batch test once for each selected model and record the results separately.
         </div>
         """,
         unsafe_allow_html=True,
@@ -837,16 +1017,17 @@ with st.expander("Experimental Testing Panel", expanded=False):
                     step=1,
                 )
 
-            if st.button("Run batch test", type="primary", use_container_width=True):
+            if st.button("Run batch test for selected model", type="primary", use_container_width=True):
                 expected_col = None if expected_col_choice == "None" else expected_col_choice
 
-                with st.spinner("Running batch predictions..."):
+                with st.spinner(f"Running batch predictions using {selected_model_name} only..."):
                     result_df = run_batch(
                         df=batch_df.head(int(max_rows)),
                         text_col=text_col,
                         expected_col=expected_col,
                         sentiment_pipe=sentiment_pipe,
                         ner_pipe=ner_pipe,
+                        sentiment_model_id=sentiment_model_id,
                     )
 
                 if result_df.empty:
@@ -868,6 +1049,7 @@ with st.expander("Experimental Testing Panel", expanded=False):
                             )
 
                     avg_runtime = result_df["runtime_sec"].mean()
+
                     with metric_cols[1 if expected_col else 0]:
                         render_metric_card(
                             "Average Runtime",
@@ -875,6 +1057,7 @@ with st.expander("Experimental Testing Panel", expanded=False):
                             "Average runtime per testing sample",
                         )
 
+                    st.markdown("**Batch testing results**")
                     st.dataframe(
                         result_df,
                         use_container_width=True,
@@ -884,12 +1067,30 @@ with st.expander("Experimental Testing Panel", expanded=False):
                     buffer = StringIO()
                     result_df.to_csv(buffer, index=False)
 
+                    safe_model_name = selected_model_name.lower().replace(" ", "_").replace("/", "_")
+                    file_name = f"batch_results_{safe_model_name}.csv"
+
                     st.download_button(
                         label="Download batch results CSV",
                         data=buffer.getvalue().encode("utf-8"),
-                        file_name="batch_testing_results.csv",
+                        file_name=file_name,
                         mime="text/csv",
                         use_container_width=True,
                     )
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# Footer
+# ============================================================
+
+st.markdown(
+    """
+    <div class="disclaimer">
+        Disclaimer: This application is developed for ISOM5240 educational project purposes.
+        It provides information briefing only and does not provide buy, sell, hold, or other investment advice.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
