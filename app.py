@@ -26,6 +26,12 @@ STABLE_SENTIMENT_MODELS = {
 DEFAULT_SENTIMENT_MODEL = "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
 
 # Second Hugging Face pipeline: Named Entity Recognition
+STABLE_NER_MODELS = {
+    "BERT Base NER": "dslim/bert-base-NER",
+    "RoBERTa Large NER": "Jean-Baptiste/roberta-large-ner-english",
+    "BERT Large CoNLL03 NER": "dbmdz/bert-large-cased-finetuned-conll03-english",
+}
+
 DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
 
@@ -198,7 +204,141 @@ def format_entities(raw_entities: list[dict]) -> list[dict]:
 
     return unique_entities
 
+def normalize_entity_text(entity: Any) -> str:
+    """
+    Normalize entity text for fair matching.
+    """
+    text = str(entity or "").lower().strip()
+    text = re.sub(r"[^a-z0-9\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
 
+
+def split_expected_entities(value: Any) -> list[str]:
+    """
+    Split expected entities from a semicolon-separated string.
+    Example: Tesla; China
+    """
+    if value is None:
+        return []
+
+    items = str(value).split(";")
+    entities = []
+
+    for item in items:
+        clean = normalize_entity_text(item)
+        if clean:
+            entities.append(clean)
+
+    return entities
+
+
+def calculate_entity_match_score(expected_entities: list[str], predicted_entities: list[dict]) -> tuple[float, str, str]:
+    """
+    Calculate NER entity match score.
+
+    Score = number of matched expected entities / number of expected entities
+
+    This is a simple and explainable metric for project experiments.
+    """
+    if not expected_entities:
+        return 0.0, "", ""
+
+    predicted_clean = [
+        normalize_entity_text(item.get("Entity", ""))
+        for item in predicted_entities
+    ]
+
+    matched = []
+    missing = []
+
+    for expected in expected_entities:
+        found = False
+
+        for predicted in predicted_clean:
+            if expected == predicted or expected in predicted or predicted in expected:
+                found = True
+                break
+
+        if found:
+            matched.append(expected)
+        else:
+            missing.append(expected)
+
+    score = len(matched) / len(expected_entities)
+
+    return score, "; ".join(matched), "; ".join(missing)
+
+
+def run_ner_batch(
+    df: pd.DataFrame,
+    text_col: str,
+    expected_entities_col: str,
+    ner_pipe,
+    ner_model_id: str,
+) -> pd.DataFrame:
+    """
+    Test Pipeline 2 only.
+
+    Important:
+    This function only runs the NER pipeline.
+    It does not run sentiment classification.
+    """
+    rows = []
+
+    for idx, row in df.iterrows():
+        text = str(row.get(text_col, "")).strip()
+
+        if not text:
+            continue
+
+        expected_entities = split_expected_entities(row.get(expected_entities_col, ""))
+
+        try:
+            started = time.perf_counter()
+
+            # Pipeline 2 only: NER
+            raw_entities = ner_pipe(text)
+            predicted_entities = format_entities(raw_entities)
+
+            elapsed = time.perf_counter() - started
+
+            score, matched, missing = calculate_entity_match_score(
+                expected_entities=expected_entities,
+                predicted_entities=predicted_entities,
+            )
+
+            rows.append(
+                {
+                    "test_id": idx + 1,
+                    "ner_model": ner_model_id,
+                    "input_news": text,
+                    "expected_entities": "; ".join(expected_entities),
+                    "predicted_entities": "; ".join(item["Entity"] for item in predicted_entities),
+                    "entity_match_score": round(score, 4),
+                    "matched_entities": matched,
+                    "missing_entities": missing,
+                    "runtime_sec": round(elapsed, 3),
+                }
+            )
+
+        except Exception as exc:
+            rows.append(
+                {
+                    "test_id": idx + 1,
+                    "ner_model": ner_model_id,
+                    "input_news": text,
+                    "expected_entities": "; ".join(expected_entities),
+                    "predicted_entities": "Error",
+                    "entity_match_score": 0,
+                    "matched_entities": "",
+                    "missing_entities": "; ".join(expected_entities),
+                    "runtime_sec": 0,
+                    "error": str(exc),
+                }
+            )
+
+    return pd.DataFrame(rows)
 def detect_risk_signals(text: str) -> list[RiskSignal]:
     """
     Rule-based business logic for identifying risk themes.
@@ -717,11 +857,24 @@ st.markdown(
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.subheader("Model Selection")
 
-selected_model_name = st.selectbox(
-    "Select one sentiment model for this test",
-    list(STABLE_SENTIMENT_MODELS.keys()),
-    index=0,
-)
+model_col1, model_col2 = st.columns(2)
+
+with model_col1:
+    selected_model_name = st.selectbox(
+        "Select Pipeline 1 sentiment model",
+        list(STABLE_SENTIMENT_MODELS.keys()),
+        index=0,
+    )
+
+with model_col2:
+    selected_ner_model_name = st.selectbox(
+        "Select Pipeline 2 NER model",
+        list(STABLE_NER_MODELS.keys()),
+        index=0,
+    )
+
+sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
+ner_model_id = STABLE_NER_MODELS[selected_ner_model_name]
 
 sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
 ner_model_id = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
@@ -1079,7 +1232,138 @@ with st.expander("Experimental Testing Panel", expanded=False):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ============================================================
+# Pipeline 2 NER Testing Panel
+# ============================================================
 
+with st.expander("Pipeline 2 NER Testing Panel", expanded=False):
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("Pipeline 2: Named Entity Recognition Testing")
+
+    st.markdown(
+        f"""
+        <div class="warning-box">
+            This section tests Pipeline 2 only. It uses the currently selected NER model:
+            <b>{html.escape(ner_model_id)}</b>.
+            It does not run the sentiment classification pipeline.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        Your CSV file should contain at least two columns:
+
+        - `text`: financial news sentence  
+        - `expected_entities`: manually labelled entities separated by semicolons  
+
+        Example: `Tesla; China`
+        """
+    )
+
+    ner_uploaded_file = st.file_uploader(
+        "Upload NER testing CSV",
+        type=["csv"],
+        key="ner_testing_csv",
+    )
+
+    if ner_uploaded_file is not None:
+        try:
+            ner_df = pd.read_csv(ner_uploaded_file)
+        except Exception as exc:
+            st.error(f"Failed to read CSV file: {exc}")
+            st.stop()
+
+        if ner_df.empty:
+            st.warning("The uploaded CSV is empty.")
+        else:
+            st.write("Preview of uploaded NER testing data")
+            st.dataframe(ner_df.head(10), use_container_width=True)
+
+            ner_columns = list(ner_df.columns)
+
+            ner_config_col1, ner_config_col2, ner_config_col3 = st.columns([2, 2, 1])
+
+            with ner_config_col1:
+                ner_text_col = st.selectbox(
+                    "Select text column for NER",
+                    ner_columns,
+                    index=ner_columns.index("text") if "text" in ner_columns else 0,
+                    key="ner_text_col",
+                )
+
+            with ner_config_col2:
+                expected_entities_col = st.selectbox(
+                    "Select expected entities column",
+                    ner_columns,
+                    index=ner_columns.index("expected_entities") if "expected_entities" in ner_columns else 0,
+                    key="expected_entities_col",
+                )
+
+            with ner_config_col3:
+                ner_max_rows = st.number_input(
+                    "NER max rows",
+                    min_value=1,
+                    max_value=min(200, len(ner_df)),
+                    value=min(30, len(ner_df)),
+                    step=1,
+                    key="ner_max_rows",
+                )
+
+            if st.button("Run Pipeline 2 NER test", type="primary", use_container_width=True):
+                with st.spinner(f"Running NER test using {selected_ner_model_name} only..."):
+                    ner_result_df = run_ner_batch(
+                        df=ner_df.head(int(ner_max_rows)),
+                        text_col=ner_text_col,
+                        expected_entities_col=expected_entities_col,
+                        ner_pipe=ner_pipe,
+                        ner_model_id=ner_model_id,
+                    )
+
+                if ner_result_df.empty:
+                    st.warning("No valid text rows were processed.")
+                else:
+                    avg_score = ner_result_df["entity_match_score"].mean()
+                    avg_runtime = ner_result_df["runtime_sec"].mean()
+
+                    metric_col1, metric_col2 = st.columns(2)
+
+                    with metric_col1:
+                        render_metric_card(
+                            "Average Entity Match Score",
+                            f"{avg_score:.1%}",
+                            "Matched expected entities / total expected entities",
+                        )
+
+                    with metric_col2:
+                        render_metric_card(
+                            "Average NER Runtime",
+                            f"{avg_runtime:.2f}s",
+                            "Average runtime per NER sample",
+                        )
+
+                    st.dataframe(
+                        ner_result_df,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    ner_buffer = StringIO()
+                    ner_result_df.to_csv(ner_buffer, index=False)
+
+                    safe_ner_model_name = selected_ner_model_name.lower().replace(" ", "_").replace("/", "_")
+
+                    st.download_button(
+                        label="Download Pipeline 2 NER results CSV",
+                        data=ner_buffer.getvalue().encode("utf-8"),
+                        file_name=f"pipeline2_ner_results_{safe_ner_model_name}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    
 # ============================================================
 # Footer
 # ============================================================
