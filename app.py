@@ -4,7 +4,7 @@ import time
 import html
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any
+from typing import Any, Optional, Tuple, List
 
 import pandas as pd
 import streamlit as st
@@ -15,8 +15,8 @@ from transformers import pipeline
 # Model Configuration
 # ============================================================
 
-# Stable sentiment models for model selection experiments.
-# Important: The app only loads and uses ONE selected sentiment model at a time.
+# Pipeline 1: Sentiment Classification candidate models
+# Important: the app only uses ONE selected sentiment model at a time.
 STABLE_SENTIMENT_MODELS = {
     "DistilRoBERTa Financial News": "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis",
     "FinancialBERT Sentiment": "ahmedrachid/FinancialBERT-Sentiment-Analysis",
@@ -25,7 +25,9 @@ STABLE_SENTIMENT_MODELS = {
 
 DEFAULT_SENTIMENT_MODEL = "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
 
-# Second Hugging Face pipeline: Named Entity Recognition
+
+# Pipeline 2: Named Entity Recognition candidate models
+# Important: the app only uses ONE selected NER model at a time.
 STABLE_NER_MODELS = {
     "BERT Base NER": "dslim/bert-base-NER",
     "RoBERTa Large NER": "Jean-Baptiste/roberta-large-ner-english",
@@ -36,7 +38,7 @@ DEFAULT_NER_MODEL = "dslim/bert-base-NER"
 
 
 # ============================================================
-# Helper Data Structure
+# Data Structure
 # ============================================================
 
 @dataclass
@@ -66,8 +68,7 @@ def normalize_sentiment_label(label: Any, model_id: str = "") -> str:
     Normalize different Hugging Face model outputs into:
     Positive, Negative, Neutral.
 
-    Different models may use different LABEL_0 / LABEL_1 / LABEL_2 mappings.
-    This function prevents label mapping errors during model testing.
+    This avoids accuracy errors caused by different LABEL_0 / LABEL_1 / LABEL_2 mappings.
     """
     if label is None:
         return ""
@@ -76,24 +77,7 @@ def normalize_sentiment_label(label: Any, model_id: str = "") -> str:
     text = raw.lower()
     model_id = str(model_id or "").lower()
 
-    # HKUST FinBERT Tone mapping:
-    # LABEL_0 = Neutral, LABEL_1 = Positive, LABEL_2 = Negative
-    if "yiyanghkust/finbert-tone" in model_id:
-        mapping = {
-            "label_0": "Neutral",
-            "label_1": "Positive",
-            "label_2": "Negative",
-            "0": "Neutral",
-            "1": "Positive",
-            "2": "Negative",
-            "neutral": "Neutral",
-            "positive": "Positive",
-            "negative": "Negative",
-        }
-        if text in mapping:
-            return mapping[text]
-
-    # FinancialBERT common mapping:
+    # FinancialBERT mapping:
     # LABEL_0 = Negative, LABEL_1 = Neutral, LABEL_2 = Positive
     if "ahmedrachid/financialbert-sentiment-analysis" in model_id:
         mapping = {
@@ -118,8 +102,7 @@ def normalize_sentiment_label(label: Any, model_id: str = "") -> str:
     if "neutral" in text:
         return "Neutral"
 
-    # General fallback mapping used by many 3-class sentiment models:
-    # LABEL_0 = Negative, LABEL_1 = Neutral, LABEL_2 = Positive
+    # General fallback mapping for many three-class sentiment models
     fallback_mapping = {
         "label_0": "Negative",
         "label_1": "Neutral",
@@ -140,12 +123,16 @@ def normalize_sentiment_label(label: Any, model_id: str = "") -> str:
 
 def coerce_prediction(raw_prediction: Any, model_id: str = "") -> dict:
     """
-    Convert Hugging Face pipeline output into a standard format:
-    {"label": ..., "score": ...}
+    Convert Hugging Face pipeline output into a standard dictionary:
+    {
+        "label": "Positive / Negative / Neutral",
+        "score": float,
+        "raw_label": original model label
+    }
     """
     if isinstance(raw_prediction, list):
         if len(raw_prediction) == 0:
-            return {"label": "Unknown", "score": 0.0}
+            return {"label": "Unknown", "score": 0.0, "raw_label": "Unknown"}
 
         first = raw_prediction[0]
 
@@ -169,7 +156,7 @@ def coerce_prediction(raw_prediction: Any, model_id: str = "") -> dict:
     return {"label": "Unknown", "score": 0.0, "raw_label": "Unknown"}
 
 
-def format_entities(raw_entities: list[dict]) -> list[dict]:
+def format_entities(raw_entities: List[dict]) -> List[dict]:
     """
     Format NER output into a clean table.
     """
@@ -204,6 +191,7 @@ def format_entities(raw_entities: list[dict]) -> list[dict]:
 
     return unique_entities
 
+
 def normalize_entity_text(entity: Any) -> str:
     """
     Normalize entity text for fair matching.
@@ -214,18 +202,17 @@ def normalize_entity_text(entity: Any) -> str:
     return text
 
 
-def split_expected_entities(value: Any) -> list[str]:
+def split_expected_entities(value: Any) -> List[str]:
     """
     Split expected entities from a semicolon-separated string.
-    Example: Tesla; China
+    Example:
+    Tesla; China
     """
     if value is None:
         return []
 
-    items = str(value).split(";")
     entities = []
-
-    for item in items:
+    for item in str(value).split(";"):
         clean = normalize_entity_text(item)
         if clean:
             entities.append(clean)
@@ -233,13 +220,14 @@ def split_expected_entities(value: Any) -> list[str]:
     return entities
 
 
-def calculate_entity_match_score(expected_entities: list[str], predicted_entities: list[dict]) -> tuple[float, str, str]:
+def calculate_entity_match_score(
+    expected_entities: List[str],
+    predicted_entities: List[dict],
+) -> Tuple[float, str, str]:
     """
     Calculate NER entity match score.
 
     Score = number of matched expected entities / number of expected entities
-
-    This is a simple and explainable metric for project experiments.
     """
     if not expected_entities:
         return 0.0, "", ""
@@ -266,80 +254,10 @@ def calculate_entity_match_score(expected_entities: list[str], predicted_entitie
             missing.append(expected)
 
     score = len(matched) / len(expected_entities)
-
     return score, "; ".join(matched), "; ".join(missing)
 
 
-def run_ner_batch(
-    df: pd.DataFrame,
-    text_col: str,
-    expected_entities_col: str,
-    ner_pipe,
-    ner_model_id: str,
-) -> pd.DataFrame:
-    """
-    Test Pipeline 2 only.
-
-    Important:
-    This function only runs the NER pipeline.
-    It does not run sentiment classification.
-    """
-    rows = []
-
-    for idx, row in df.iterrows():
-        text = str(row.get(text_col, "")).strip()
-
-        if not text:
-            continue
-
-        expected_entities = split_expected_entities(row.get(expected_entities_col, ""))
-
-        try:
-            started = time.perf_counter()
-
-            # Pipeline 2 only: NER
-            raw_entities = ner_pipe(text)
-            predicted_entities = format_entities(raw_entities)
-
-            elapsed = time.perf_counter() - started
-
-            score, matched, missing = calculate_entity_match_score(
-                expected_entities=expected_entities,
-                predicted_entities=predicted_entities,
-            )
-
-            rows.append(
-                {
-                    "test_id": idx + 1,
-                    "ner_model": ner_model_id,
-                    "input_news": text,
-                    "expected_entities": "; ".join(expected_entities),
-                    "predicted_entities": "; ".join(item["Entity"] for item in predicted_entities),
-                    "entity_match_score": round(score, 4),
-                    "matched_entities": matched,
-                    "missing_entities": missing,
-                    "runtime_sec": round(elapsed, 3),
-                }
-            )
-
-        except Exception as exc:
-            rows.append(
-                {
-                    "test_id": idx + 1,
-                    "ner_model": ner_model_id,
-                    "input_news": text,
-                    "expected_entities": "; ".join(expected_entities),
-                    "predicted_entities": "Error",
-                    "entity_match_score": 0,
-                    "matched_entities": "",
-                    "missing_entities": "; ".join(expected_entities),
-                    "runtime_sec": 0,
-                    "error": str(exc),
-                }
-            )
-
-    return pd.DataFrame(rows)
-def detect_risk_signals(text: str) -> list[RiskSignal]:
+def detect_risk_signals(text: str) -> List[RiskSignal]:
     """
     Rule-based business logic for identifying risk themes.
     This is not counted as a Hugging Face pipeline.
@@ -407,11 +325,11 @@ def evaluate_correctness(expected_label: str, predicted_label: str) -> str:
 def build_beginner_explanation(
     sentiment: str,
     confidence: float,
-    risk_signals: list[RiskSignal],
-    entities: list[dict],
+    risk_signals: List[RiskSignal],
+    entities: List[dict],
 ) -> str:
     """
-    Build a short plain-English explanation for beginner investors.
+    Build a plain-English explanation for beginner investors.
     """
     sentiment = normalize_sentiment_label(sentiment)
     confidence_pct = confidence * 100
@@ -441,7 +359,10 @@ def build_beginner_explanation(
             f"{item.name} ({item.evidence})" for item in risk_signals
         ) + "."
     else:
-        risk_text = " No obvious rule-based risk theme was detected, but the original context should still be reviewed."
+        risk_text = (
+            " No obvious rule-based risk theme was detected, "
+            "but the original context should still be reviewed."
+        )
 
     if entities:
         entity_names = [row["Entity"] for row in entities[:5]]
@@ -460,7 +381,7 @@ def build_beginner_explanation(
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
-def load_sentiment_pipeline(model_id: str, hf_token: str | None = None):
+def load_sentiment_pipeline(model_id: str, hf_token: Optional[str] = None):
     """
     Load only the selected sentiment model.
     Streamlit caches by model_id, so different models will not be mixed.
@@ -478,9 +399,10 @@ def load_sentiment_pipeline(model_id: str, hf_token: str | None = None):
 
 
 @st.cache_resource(show_spinner=False)
-def load_ner_pipeline(model_id: str, hf_token: str | None = None):
+def load_ner_pipeline(model_id: str, hf_token: Optional[str] = None):
     """
-    Load the NER pipeline.
+    Load only the selected NER model.
+    Streamlit caches by model_id, so different models will not be mixed.
     """
     kwargs = {
         "task": "token-classification",
@@ -499,13 +421,18 @@ def load_ner_pipeline(model_id: str, hf_token: str | None = None):
 # Core Analysis Functions
 # ============================================================
 
-def analyze_news(text: str, sentiment_pipe, ner_pipe, sentiment_model_id: str) -> dict:
+def analyze_news(
+    text: str,
+    sentiment_pipe,
+    ner_pipe,
+    sentiment_model_id: str,
+) -> dict:
     """
-    Run the full app process using ONLY the currently selected sentiment model:
-    1. Sentiment classification
-    2. Named entity recognition
-    3. Rule-based risk detection
-    4. Beginner-friendly explanation
+    Run the complete app process:
+    1. Pipeline 1: selected sentiment classification model
+    2. Pipeline 2: selected NER model
+    3. Rule-based risk signal detection
+    4. Beginner-friendly briefing
     """
     clean_text = " ".join(str(text or "").split())
 
@@ -514,11 +441,11 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe, sentiment_model_id: str) -
 
     started = time.perf_counter()
 
-    # Pipeline 1: selected sentiment model only
+    # Pipeline 1: sentiment classification
     raw_sentiment = sentiment_pipe(clean_text, truncation=True, max_length=512)
     sentiment_result = coerce_prediction(raw_sentiment, sentiment_model_id)
 
-    # Pipeline 2: NER
+    # Pipeline 2: named entity recognition
     ner_text = clean_text
 
     try:
@@ -562,14 +489,13 @@ def analyze_news(text: str, sentiment_pipe, ner_pipe, sentiment_model_id: str) -
 def run_batch(
     df: pd.DataFrame,
     text_col: str,
-    expected_col: str | None,
+    expected_col: Optional[str],
     sentiment_pipe,
     ner_pipe,
     sentiment_model_id: str,
 ) -> pd.DataFrame:
     """
-    Run batch testing using ONE selected sentiment model.
-    This prevents different sentiment pipelines from being mixed in one test.
+    Run app performance testing using ONE selected sentiment model and ONE selected NER model.
     """
     rows = []
 
@@ -620,6 +546,76 @@ def run_batch(
                     "correct_or_not": "Incorrect" if expected_col else "",
                     "risk_signals": "",
                     "entities": "",
+                    "error": str(exc),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def run_ner_batch(
+    df: pd.DataFrame,
+    text_col: str,
+    expected_entities_col: str,
+    ner_pipe,
+    ner_model_id: str,
+) -> pd.DataFrame:
+    """
+    Test Pipeline 2 only.
+
+    Important:
+    This function only runs the NER pipeline.
+    It does not run sentiment classification.
+    """
+    rows = []
+
+    for idx, row in df.iterrows():
+        text = str(row.get(text_col, "")).strip()
+
+        if not text:
+            continue
+
+        expected_entities = split_expected_entities(row.get(expected_entities_col, ""))
+
+        try:
+            started = time.perf_counter()
+
+            raw_entities = ner_pipe(text)
+            predicted_entities = format_entities(raw_entities)
+
+            elapsed = time.perf_counter() - started
+
+            score, matched, missing = calculate_entity_match_score(
+                expected_entities=expected_entities,
+                predicted_entities=predicted_entities,
+            )
+
+            rows.append(
+                {
+                    "test_id": idx + 1,
+                    "ner_model": ner_model_id,
+                    "input_news": text,
+                    "expected_entities": "; ".join(expected_entities),
+                    "predicted_entities": "; ".join(item["Entity"] for item in predicted_entities),
+                    "entity_match_score": round(score, 4),
+                    "matched_entities": matched,
+                    "missing_entities": missing,
+                    "runtime_sec": round(elapsed, 3),
+                }
+            )
+
+        except Exception as exc:
+            rows.append(
+                {
+                    "test_id": idx + 1,
+                    "ner_model": ner_model_id,
+                    "input_news": text,
+                    "expected_entities": "; ".join(expected_entities),
+                    "predicted_entities": "Error",
+                    "entity_match_score": 0,
+                    "matched_entities": "",
+                    "missing_entities": "; ".join(expected_entities),
+                    "runtime_sec": 0,
                     "error": str(exc),
                 }
             )
@@ -873,18 +869,17 @@ with model_col2:
         index=0,
     )
 
+# Correct model assignment.
+# Do not overwrite ner_model_id with DEFAULT_NER_MODEL here.
 sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
 ner_model_id = STABLE_NER_MODELS[selected_ner_model_name]
-
-sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
-ner_model_id = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
 
 st.markdown(
     f"""
     <div class="info-box">
         Current sentiment model: <b>{html.escape(sentiment_model_id)}</b><br>
         Current NER model: <b>{html.escape(ner_model_id)}</b><br>
-        Only the selected sentiment model will be used in single testing and batch testing.
+        Single testing and batch testing use the currently selected models only.
     </div>
     """,
     unsafe_allow_html=True,
@@ -900,8 +895,8 @@ with st.expander("View pipeline structure"):
         3. Additional business logic: Risk signal detection  
         4. Output: Beginner-friendly briefing  
 
-        For experimental results, select one sentiment model, run the same testing CSV,
-        download the result, and then repeat the process for another model.
+        For experimental results, select one model, run the same testing CSV,
+        download the result, and repeat the process for another model.
         """
     )
 
@@ -919,7 +914,7 @@ try:
             hf_token=hf_token if hf_token else None,
         )
 
-    with st.spinner("Loading NER pipeline..."):
+    with st.spinner(f"Loading selected NER pipeline: {selected_ner_model_name}"):
         ner_pipe = load_ner_pipeline(
             model_id=ner_model_id,
             hf_token=hf_token if hf_token else None,
@@ -1008,8 +1003,11 @@ if submitted:
         )
 
         with tab_briefing:
-            st.markdown("**Model used**")
+            st.markdown("**Sentiment model used**")
             st.write(result["sentiment_model_id"])
+
+            st.markdown("**NER model used**")
+            st.write(ner_model_id)
 
             st.markdown("**Input news**")
             st.write(result["text"])
@@ -1058,6 +1056,7 @@ if submitted:
                 [
                     {
                         "sentiment_model": result["sentiment_model_id"],
+                        "ner_model": ner_model_id,
                         "input_news": result["text"],
                         "raw_model_label": result["raw_sentiment_label"],
                         "sentiment": result["sentiment"],
@@ -1085,7 +1084,7 @@ if submitted:
 
 
 # ============================================================
-# Experimental Testing Panel
+# Experimental Testing Panel: Pipeline 1 + Full App
 # ============================================================
 
 with st.expander("Experimental Testing Panel", expanded=False):
@@ -1095,9 +1094,11 @@ with st.expander("Experimental Testing Panel", expanded=False):
     st.markdown(
         f"""
         <div class="warning-box">
-            This section is for project evaluation. It uses only the currently selected sentiment model:
-            <b>{html.escape(sentiment_model_id)}</b>.
-            To compare models, run this batch test once for each selected model and record the results separately.
+            This section is for project evaluation. It uses the currently selected sentiment model:
+            <b>{html.escape(sentiment_model_id)}</b>.<br>
+            It also uses the currently selected NER model:
+            <b>{html.escape(ner_model_id)}</b>.<br>
+            To compare sentiment models, run this batch test once for each selected model and record results separately.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1232,6 +1233,7 @@ with st.expander("Experimental Testing Panel", expanded=False):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 # ============================================================
 # Pipeline 2 NER Testing Panel
 # ============================================================
@@ -1244,7 +1246,7 @@ with st.expander("Pipeline 2 NER Testing Panel", expanded=False):
         f"""
         <div class="warning-box">
             This section tests Pipeline 2 only. It uses the currently selected NER model:
-            <b>{html.escape(ner_model_id)}</b>.
+            <b>{html.escape(ner_model_id)}</b>.<br>
             It does not run the sentiment classification pipeline.
         </div>
         """,
@@ -1363,7 +1365,8 @@ with st.expander("Pipeline 2 NER Testing Panel", expanded=False):
                     )
 
     st.markdown("</div>", unsafe_allow_html=True)
-    
+
+
 # ============================================================
 # Footer
 # ============================================================
