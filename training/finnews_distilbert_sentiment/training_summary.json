@@ -1,0 +1,30 @@
+{
+  "base_model": "distilbert-base-uncased",
+  "dataset": "atrost/financial_phrasebank",
+  "labels": [
+    "Negative",
+    "Neutral",
+    "Positive"
+  ],
+  "num_train_samples": 3100,
+  "num_validation_samples": 776,
+  "num_test_samples": 970,
+  "validation_metrics": {
+    "eval_loss": 0.42706283926963806,
+    "eval_accuracy": 0.854381443298969,
+    "eval_macro_f1": 0.8381067681931591,
+    "eval_runtime": 14.8835,
+    "eval_samples_per_second": 52.138,
+    "eval_steps_per_second": 1.68,
+    "epoch": 4.0
+  },
+  "test_metrics": {
+    "test_loss": 0.4764998257160187,
+    "test_accuracy": 0.8412371134020619,
+    "test_macro_f1": 0.8260377493514522,
+    "test_runtime": 24.6642,
+    "test_samples_per_second": 39.328,
+    "test_steps_per_second": 1.257,
+    "epoch": 4.0
+  }
+}

@@ -191,21 +191,25 @@ for text in examples:
     print()
 
 # %% [markdown]
-# ## Upload to Hugging Face
+# ## Optional Upload to Hugging Face
 #
-# Run this section only after creating a Hugging Face write token.
-# In Colab, use the left sidebar secret manager or paste the token when prompted.
+# The model has already been uploaded for this project:
+#
+# https://huggingface.co/FerdinandKONG/finnews-distilbert-sentiment
+#
+# This upload section is disabled by default so that `Restart & Run All` can finish without
+# requiring the grader to enter a private Hugging Face token.
 
 # %%
-from huggingface_hub import notebook_login
+UPLOAD_TO_HUB = False
+HUB_MODEL_ID = "FerdinandKONG/finnews-distilbert-sentiment"
 
-notebook_login()
+if UPLOAD_TO_HUB:
+    from huggingface_hub import notebook_login
 
-# %%
-# Replace this with your own Hugging Face username and model name.
-HUB_MODEL_ID = "your-hf-username/finnews-distilbert-sentiment"
-
-model.push_to_hub(HUB_MODEL_ID)
-tokenizer.push_to_hub(HUB_MODEL_ID)
-
-print(f"Model URL: https://huggingface.co/{HUB_MODEL_ID}")
+    notebook_login()
+    model.push_to_hub(HUB_MODEL_ID)
+    tokenizer.push_to_hub(HUB_MODEL_ID)
+    print(f"Model URL: https://huggingface.co/{HUB_MODEL_ID}")
+else:
+    print(f"Upload skipped. Existing model URL: https://huggingface.co/{HUB_MODEL_ID}")
