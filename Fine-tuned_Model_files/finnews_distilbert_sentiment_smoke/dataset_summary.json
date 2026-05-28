@@ -1,0 +1,13 @@
+{
+  "base_model": "distilbert-base-uncased",
+  "dataset_name": "atrost/financial_phrasebank",
+  "dataset_config": "",
+  "labels": [
+    "Negative",
+    "Neutral",
+    "Positive"
+  ],
+  "num_train_samples": 300,
+  "num_validation_samples": 75,
+  "num_test_samples": 75
+}

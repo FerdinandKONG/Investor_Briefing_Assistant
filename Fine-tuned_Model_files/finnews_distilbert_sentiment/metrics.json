@@ -1,0 +1,20 @@
+{
+  "validation": {
+    "eval_loss": 0.40164121985435486,
+    "eval_accuracy": 0.8440721649484536,
+    "eval_macro_f1": 0.8254476675972003,
+    "eval_runtime": 14.8248,
+    "eval_samples_per_second": 52.345,
+    "eval_steps_per_second": 0.877,
+    "epoch": 3.0
+  },
+  "test": {
+    "test_loss": 0.4181930124759674,
+    "test_accuracy": 0.831958762886598,
+    "test_macro_f1": 0.8111794805931845,
+    "test_runtime": 20.2554,
+    "test_samples_per_second": 47.889,
+    "test_steps_per_second": 0.79,
+    "epoch": 3.0
+  }
+}

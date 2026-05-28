@@ -32,11 +32,12 @@ streamlit run app.py
 By default, the app uses:
 
 ```text
-SENTIMENT_MODEL_ID=ProsusAI/finbert
+SENTIMENT_MODEL_ID=mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis
 NER_MODEL_ID=dslim/bert-base-NER
 ```
 
-For the final submission, replace `SENTIMENT_MODEL_ID` with your group's fine-tuned Hugging Face model URL or model id.
+For the final submission, set `SENTIMENT_MODEL_ID` to your group's fine-tuned Hugging Face model id.
+The app will show it as **Fine-tuned Sentiment Model** in the model selector.
 
 On Streamlit Cloud, add this in **Secrets**:
 
@@ -52,6 +53,26 @@ The same sentiment model id should appear in:
 - Experimental_results.xlsx
 - Hugging Face model URL
 - Fine-tuning notebook output
+
+## Fine-tuning
+
+Fine-tuning materials are in:
+
+```text
+training/
+```
+
+Recommended notebook:
+
+```text
+training/fine_tune_financial_sentiment_colab.ipynb
+```
+
+Upload instructions:
+
+```text
+training/README_finetune_upload.md
+```
 
 ## Batch testing CSV format
 

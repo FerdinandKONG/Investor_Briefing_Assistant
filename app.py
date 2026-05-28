@@ -834,6 +834,40 @@ st.markdown(
 # ============================================================
 
 hf_token = read_config("HF_TOKEN", "")
+configured_sentiment_model = read_config("SENTIMENT_MODEL_ID", DEFAULT_SENTIMENT_MODEL)
+configured_ner_model = read_config("NER_MODEL_ID", DEFAULT_NER_MODEL)
+
+sentiment_model_options = dict(STABLE_SENTIMENT_MODELS)
+if configured_sentiment_model and configured_sentiment_model not in sentiment_model_options.values():
+    sentiment_model_options = {
+        "Fine-tuned Sentiment Model": configured_sentiment_model,
+        **sentiment_model_options,
+    }
+
+ner_model_options = dict(STABLE_NER_MODELS)
+if configured_ner_model and configured_ner_model not in ner_model_options.values():
+    ner_model_options = {
+        "Configured NER Model": configured_ner_model,
+        **ner_model_options,
+    }
+
+sentiment_default_index = next(
+    (
+        idx
+        for idx, model_id in enumerate(sentiment_model_options.values())
+        if model_id == configured_sentiment_model
+    ),
+    0,
+)
+
+ner_default_index = next(
+    (
+        idx
+        for idx, model_id in enumerate(ner_model_options.values())
+        if model_id == configured_ner_model
+    ),
+    0,
+)
 
 st.markdown(
     """
@@ -858,21 +892,21 @@ model_col1, model_col2 = st.columns(2)
 with model_col1:
     selected_model_name = st.selectbox(
         "Select Pipeline 1 sentiment model",
-        list(STABLE_SENTIMENT_MODELS.keys()),
-        index=0,
+        list(sentiment_model_options.keys()),
+        index=sentiment_default_index,
     )
 
 with model_col2:
     selected_ner_model_name = st.selectbox(
         "Select Pipeline 2 NER model",
-        list(STABLE_NER_MODELS.keys()),
-        index=0,
+        list(ner_model_options.keys()),
+        index=ner_default_index,
     )
 
 # Correct model assignment.
 # Do not overwrite ner_model_id with DEFAULT_NER_MODEL here.
-sentiment_model_id = STABLE_SENTIMENT_MODELS[selected_model_name]
-ner_model_id = STABLE_NER_MODELS[selected_ner_model_name]
+sentiment_model_id = sentiment_model_options[selected_model_name]
+ner_model_id = ner_model_options[selected_ner_model_name]
 
 st.markdown(
     f"""
